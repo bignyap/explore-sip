@@ -1,0 +1,72 @@
+services:
+  drachtio-server:
+    image: drachtio/drachtio-server
+    container_name: drachtio-server
+    ports:
+      - "9022:9022"
+      - "5060:5060/udp"
+    environment:
+      - DRACHTIO_LOGLEVEL=debug
+      - DRACHTIO_SECRET=cymru
+
+  drachtio-app:
+    image: node:18
+    container_name: drachtio-app
+    working_dir: /app
+    volumes:
+      - ./app:/app
+    command: "npm install && node index.js"
+    depends_on:
+      - drachtio-server
+    environment:
+      - NODE_ENV=development
+
+  sipp-client:
+    image: drachtio/sipp
+    container_name: sipp-client
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Drachtio to be ready..." && sleep 5 && \
+        sipp -sf /sipp/uac.xml drachtio-server:5060 -s 1234 -r 1 -m 1 -trace_err -trace_msg -trace_logs
+    volumes:
+      - ./sipp:/sipp
+    depends_on:
+      - drachtio-server
+
+  homer-ui:
+    image: sipcapture/homer-docker
+    container_name: homer-ui
+    environment:
+      - DB_USER=homer_user
+      - DB_PASS=homer_password
+      - DB_NAME=homer_db
+    ports:
+      - "9080:80"
+    depends_on:
+      - homer-db
+
+  homer-db:
+    image: mariadb:10.5
+    container_name: homer-db
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpass
+      - MYSQL_DATABASE=homer_db
+      - MYSQL_USER=homer_user
+      - MYSQL_PASSWORD=homer_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - homer_db_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  heplify:
+    image: sipcapture/heplify:latest
+    command:
+      ./heplify -e -hs homer-ui:9060 -m SIP -dd -zf -l info
+    depends_on:
+      - homer-ui  # Make sure HOMER is ready before starting heplify
+    restart: unless-stopped
+
+volumes:
+  homer_db_data:
