@@ -7,14 +7,20 @@ srf.connect({
   secret: 'cymru'
 });
 
+// ... existing code ...
 srf.on('connect', (err, hp) => {
-  console.log(`Connected to drachtio server at ${hp}`);
+  if (err) {
+    console.error(`Error connecting to drachtio server: ${err}`);
+  } else {
+    console.log(`Connected to drachtio server at ${hp}`);
+  }
 });
-
-srf.on('error', (err) => {
-  console.error('Error connecting to Drachtio server:', err);
-});
+// ... existing code ...
 
 srf.invite((req, res) => {
-  res.send(486); // Busy Here (just a test response)
+  res.send(486, 'So sorry, busy right now', {
+    headers: {
+      'X-Custom-Header': 'because why not?'
+    }
+  });
 });

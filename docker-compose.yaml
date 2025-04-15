@@ -15,7 +15,8 @@ services:
     working_dir: /app
     volumes:
       - ./app:/app
-    command: "npm install && node index.js"
+    command: >
+      sh -c "npm install && node index.js"
     depends_on:
       - drachtio-server
     environment:
@@ -34,39 +35,82 @@ services:
     depends_on:
       - drachtio-server
 
-  homer-ui:
-    image: sipcapture/homer-docker
-    container_name: homer-ui
-    environment:
-      - DB_USER=homer_user
-      - DB_PASS=homer_password
-      - DB_NAME=homer_db
+  caddy:
+    container_name: caddy
+    image: stefanprodan/caddy
     ports:
-      - "9080:80"
-    depends_on:
-      - homer-db
-
-  homer-db:
-    image: mariadb:10.5
-    container_name: homer-db
-    environment:
-      - MYSQL_ROOT_PASSWORD=rootpass
-      - MYSQL_DATABASE=homer_db
-      - MYSQL_USER=homer_user
-      - MYSQL_PASSWORD=homer_password
-    ports:
-      - "3306:3306"
+      - "9080:9080"
     volumes:
-      - homer_db_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-
-  heplify:
-    image: sipcapture/heplify:latest
-    command:
-      ./heplify -e -hs homer-ui:9060 -m SIP -dd -zf -l info
-    depends_on:
-      - homer-ui  # Make sure HOMER is ready before starting heplify
+      - ./caddy/:/etc/caddy/
+    environment:
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
     restart: unless-stopped
+    labels:
+      org.label-schema.group: "monitoring"
+
+  heplify-server:
+    image: sipcapture/heplify-server
+    container_name: heplify-server
+    ports:
+      - "9060:9060"
+      - "9060:9060/udp"
+    command:
+      - './heplify-server'
+    environment:
+      - "HEPLIFYSERVER_DBSHEMA=homer7"
+      - "HEPLIFYSERVER_DBDRIVER=postgres"
+      - "HEPLIFYSERVER_DBADDR=db:5432"
+      - "HEPLIFYSERVER_DBUSER=root"
+      - "HEPLIFYSERVER_DBPASS=homerSeven"
+      - "HEPLIFYSERVER_DBDATATABLE=homer_data"
+      - "HEPLIFYSERVER_DBCONFTABLE=homer_config"
+      - "HEPLIFYSERVER_DBDROPDAYS=5"
+      - "HEPLIFYSERVER_LOGLVL=info"
+      - "HEPLIFYSERVER_LOGSTD=true"
+    restart: unless-stopped
+    depends_on:
+      - db
+    expose:
+      - 9090
+    labels:
+      org.label-schema.group: "monitoring"
+
+  homer-webapp:
+    container_name: homer-webapp
+    image: sipcapture/webapp
+    environment:
+      - "DB_HOST=db"
+      - "DB_USER=root"
+      - "DB_PASS=homerSeven"
+    restart: unless-stopped
+    expose:
+      - 80
+    volumes:
+      - ./bootstrap:/app/bootstrap
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    container_name: db
+    image: postgres:11-alpine
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: homerSeven
+      POSTGRES_USER: root
+    ports:
+      - "5432:5432"
+    expose:
+      - 5432
+    volumes:
+      - ./init-user-db.sh:/docker-entrypoint-initdb.d/init-user-db.sh
+      - homer_db_data1:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "psql -h 'localhost' -U 'root' -c '\\l'"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
 
 volumes:
-  homer_db_data:
+  homer_db_data1:
